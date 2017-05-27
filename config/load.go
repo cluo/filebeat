@@ -17,8 +17,24 @@ var (
 	etcdApp  = flag.String("app", "", "etcd app key.")
 	etcdAddr = flag.String("etcd", "", "etcd addr list.")
 
+	client  *clientv3.Client
 	version int64
 )
+
+func init() {
+	flag.Parse()
+
+	if *etcdAddr != "" {
+		c, err := clientv3.New(clientv3.Config{
+			Endpoints:   strings.Split(*etcdAddr, ","),
+			DialTimeout: etcdTimeout,
+		})
+		if err != nil {
+			panic(err)
+		}
+		client = c
+	}
+}
 
 const (
 	etcdTimeout = time.Second * 3
@@ -26,22 +42,16 @@ const (
 
 //LoadConfig load config file from etcd.
 func LoadConfig() (bool, error) {
-	flag.Parse()
-
-	if *etcdAddr == "" {
+	if client == nil {
 		return false, nil
 	}
 
-	c, err := clientv3.New(clientv3.Config{
-		Endpoints:   strings.Split(*etcdAddr, ","),
-		DialTimeout: etcdTimeout,
-	})
-
 	ctx, cancel := context.WithTimeout(context.Background(), etcdTimeout)
-	resp, err := clientv3.NewKV(c).Get(ctx, *etcdApp)
+	resp, err := clientv3.NewKV(client).Get(ctx, *etcdApp)
 	cancel()
+
 	if err != nil {
-		return true, err
+		panic(err)
 	}
 
 	if len(resp.Kvs) == 0 {
