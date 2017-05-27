@@ -1,0 +1,22 @@
+filebeat.prospectors:
+
+- input_type: log
+  paths: ["/tmp/test.log"]
+  document_type: testlog
+  symlinks: true
+  json.keys_under_root: true
+  scan_frequency: 1s
+
+processors:
+  - filter_fields:
+      fields: ["\\w(\\d+\\s+.*)\\s+(.*)\\s+(.*)\\s+json_data:(.*)"]
+      names: ["date", "f2", "f3", "json_data"]
+  - decode_json_fields:
+      fields: ["json_data"]
+
+output.console:
+  enabled: true
+  pretty: true
+
+
+logging.level: debug

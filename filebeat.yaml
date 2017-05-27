@@ -1,0 +1,19 @@
+fields_under_root: true
+
+filebeat.prospectors:
+
+- input_type: log
+  paths: ["api.log"]
+  document_type: api_dbs
+  scan_frequency: 3s
+  include_lines: [".*requsetId.*"]
+
+processors:
+  - filter_fields:
+      fields: ["(\\d{4}/\\d{2}/\\d{2}\\s\\d{2}:\\d{2}:\\d{2}).*\\s(\\w.+):\\s\\[(\\w.+?)\\].*requsetId:(\\w+).(.*)"]
+      names: ["@timestamp", "file", "level", "id", "message"]
+      date_format: "2006/01/02 15:04:05"
+
+output.console:
+  pretty: true
+logging.level: debug
