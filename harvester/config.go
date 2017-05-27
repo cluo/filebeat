@@ -9,8 +9,8 @@ import (
 	"github.com/dearcode/libbeat/common"
 	"github.com/dearcode/libbeat/common/match"
 
-	"github.com/dustin/go-humanize"
 	"github.com/dearcode/libbeat/logp"
+	"github.com/dustin/go-humanize"
 )
 
 var (
