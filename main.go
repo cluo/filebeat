@@ -1,49 +1,63 @@
 package main
 
 import (
-	"fmt"
-	"log"
+	"flag"
 	"os"
 	"syscall"
 	"time"
 
+	"github.com/dearcode/libbeat/beat"
+	"github.com/juju/errors"
+	"github.com/zssky/log"
+
 	"github.com/dearcode/filebeat/beater"
 	"github.com/dearcode/filebeat/config"
-	"github.com/dearcode/libbeat/beat"
 )
 
 var Name = "filebeat"
 
-func fork() int {
+const (
+	watcherTimeout = time.Minute
+)
+
+func fork(path string) int {
 	attr := syscall.ProcAttr{
 		Env:   os.Environ(),
 		Files: []uintptr{os.Stdin.Fd(), os.Stdout.Fd(), os.Stderr.Fd()},
 	}
 
-	pid, err := syscall.ForkExec(os.Args[0], os.Args[:1], &attr)
+	argv := []string{os.Args[0], "-c", path}
+	if home := flag.Lookup("path.home"); home.Value.String() != "" {
+		argv = append(argv, "-path.home")
+		argv = append(argv, home.Value.String())
+	}
+
+	pid, err := syscall.ForkExec(os.Args[0], argv, &attr)
 	if err != nil {
 		panic(err)
 	}
 
-	log.Printf("new child pid:%v", pid)
+	log.Infof("new child pid:%v, argv:%v", pid, argv)
+
 	return pid
 }
 
-func watcher() {
-	t := time.NewTicker(time.Second * 3)
-	pid := fork()
+func watcher(path string) {
+	if path == "" {
+		return
+	}
 
-	for {
-		<-t.C
+	pid := fork(path)
 
-		load, err := config.LoadConfig()
+	for range time.NewTicker(watcherTimeout).C {
+		path, err := config.LoadConfig()
 		if err != nil {
-			log.Printf("load config error:%v", err)
+			log.Infof("load config %v", err)
 			continue
 		}
 
-		if !load {
-			log.Printf("no change")
+		if path == "" {
+			log.Infof("the configuration file has not changed")
 			continue
 		}
 
@@ -51,12 +65,13 @@ func watcher() {
 
 		var wstatus syscall.WaitStatus
 
+		log.Debugf("Wait4 pid:%v", pid)
 		if _, err := syscall.Wait4(pid, &wstatus, 0, nil); err != nil {
 			panic(err)
 		}
-		fmt.Printf("Wait4 pid:%v, status:%v\n", pid, wstatus)
+		log.Debugf("pid:%v, status:%v", pid, wstatus)
 
-		pid = fork()
+		pid = fork(path)
 	}
 }
 
@@ -70,16 +85,16 @@ func watcher() {
 // determine where in each file to restart a harvester.
 
 func main() {
-	load, err := config.LoadConfig()
+	flag.Parse()
+	path, err := config.LoadConfig()
 	if err != nil {
-		panic(err)
+		panic(errors.ErrorStack(err))
 	}
 
-	if load {
-		watcher()
-	}
+	watcher(path)
 
-	if err := beat.Run(Name, "", beater.New); err != nil {
+	log.Debugf("argv:%#v", os.Args)
+	if err = beat.Run(Name, "", beater.New); err != nil {
 		os.Exit(1)
 	}
 }

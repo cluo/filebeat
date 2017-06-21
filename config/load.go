@@ -1,73 +1,58 @@
 package config
 
 import (
+	"bytes"
 	"flag"
 	"fmt"
 	"io/ioutil"
-	"log"
-	"strings"
 	"time"
 
-	"github.com/coreos/etcd/clientv3"
-	"github.com/dearcode/libbeat/logp"
-	"golang.org/x/net/context"
+	"github.com/juju/errors"
+	"github.com/zssky/log"
+
+	"github.com/dearcode/crab/http"
 )
 
 var (
-	etcdApp  = flag.String("app", "", "etcd app key.")
-	etcdAddr = flag.String("etcd", "", "etcd addr list.")
-
-	client  *clientv3.Client
-	version int64
+	domain = flag.String("domain", "", "tracker manager domain.")
+	app    = flag.String("app", "", "tracker app name.")
+	module = flag.String("module", "", "tracker module name.")
+	old    []byte
 )
-
-func init() {
-	flag.Parse()
-
-	if *etcdAddr != "" {
-		c, err := clientv3.New(clientv3.Config{
-			Endpoints:   strings.Split(*etcdAddr, ","),
-			DialTimeout: etcdTimeout,
-		})
-		if err != nil {
-			panic(err)
-		}
-		client = c
-	}
-}
 
 const (
-	etcdTimeout = time.Second * 3
+	httpTimeout = time.Second * 3
 )
 
-//LoadConfig load config file from etcd.
-func LoadConfig() (bool, error) {
-	if client == nil {
-		return false, nil
+//LoadConfig load topics from manager server.
+func LoadConfig() (string, error) {
+	flag.Parse()
+
+	if *domain == "" {
+		return "", nil
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), etcdTimeout)
-	resp, err := clientv3.NewKV(client).Get(ctx, *etcdApp)
-	cancel()
-
+	log.Infof("domain:%v app:%v module:%v", *domain, *app, *module)
+	url := fmt.Sprintf("http://%s/api/module/?APP=%s&Module=%s", *domain, *app, *module)
+	buf, _, err := http.NewClient(httpTimeout).Get(url, nil, nil)
 	if err != nil {
-		panic(err)
+		log.Errorf("Get module error:%v, domain:%v", errors.ErrorStack(err), *domain)
+		return "", err
 	}
 
-	if len(resp.Kvs) == 0 {
-		return true, fmt.Errorf("%v not found in etcd", *etcdApp)
+	if bytes.Equal(old, buf) {
+		return "", nil
 	}
 
-	log.Printf("local version:%v, modRevision:%v", version, resp.Kvs[0].ModRevision)
-
-	if version != 0 && version == resp.Kvs[0].ModRevision {
-		return false, nil
+	path := fmt.Sprintf("/tmp/%v_%v.yml", *app, *module)
+	if err = ioutil.WriteFile(path, buf, 0644); err != nil {
+		log.Errorf("write file %v, data:%s", errors.ErrorStack(err), buf)
+		return "", err
 	}
 
-	version = resp.Kvs[0].ModRevision
+	old = buf
 
-	log.Printf("config version:%v", version)
-	logp.Info("config version:%v", version)
+	log.Infof("new config:%v", path)
 
-	return true, ioutil.WriteFile("./filebeat.yml", resp.Kvs[0].Value, 0644)
+	return path, nil
 }
